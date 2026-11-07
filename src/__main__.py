@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from llm_sdk import Small_LLM_Model
+from llm_sdk.llm_sdk import Small_LLM_Model
 
 from src.selector import FunctionSelector
 from src.validator import FunctionValidator

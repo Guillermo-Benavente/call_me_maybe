@@ -19,10 +19,5 @@ dev = [
 mypy_path = "llm_sdk"
 exclude = ["^llm_sdk/", "^\\.venv/"]
 
-[tool.uv.workspace]
-members = [
-    "llm_sdk",
-]
-
 [tool.uv.sources]
-llm-sdk = { workspace = true }
+llm-sdk = { path = "llm_sdk" }

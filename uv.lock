@@ -8,12 +8,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[manifest]
-members = [
-    "call-me-maybe",
-    "llm-sdk",
-]
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -131,7 +125,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "llm-sdk", editable = "llm_sdk" },
+    { name = "llm-sdk", directory = "llm_sdk" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pydantic", specifier = ">=2.14.0" },
 ]
@@ -678,7 +672,7 @@ wheels = [
 [[package]]
 name = "llm-sdk"
 version = "0.1.0"
-source = { editable = "llm_sdk" }
+source = { directory = "llm_sdk" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
