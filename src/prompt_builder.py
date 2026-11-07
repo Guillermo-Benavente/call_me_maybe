@@ -13,6 +13,10 @@ class PromptBuilder:
     ) -> str:
         """Build the prompt that describes the available functions.
 
+        The prompt is kept compact on purpose: a small model follows short,
+        single-line instructions more reliably than an indented copy of the
+        definitions, and the return type is not needed to build the call.
+
         Args:
             user_prompt: Natural-language request from the user.
             functions: Available function definitions.
@@ -22,38 +26,36 @@ class PromptBuilder:
         """
         functions_json = json.dumps(
             [
-                function.model_dump(exclude_none=True)
+                function.model_dump(
+                    exclude={"returns"},
+                    exclude_none=True,
+                )
                 for function in functions
             ],
-            indent=2,
             ensure_ascii=False,
         )
 
-        return f"""
-You are an assistant that selects functions based on user requests.
+        return f"""{PromptBuilder._INSTRUCTIONS}
 
 Available functions:
 {functions_json}
 
-Instructions:
-- Select the most appropriate function for the user's request.
-- Use only the functions provided above.
-- Extract the required arguments from the user's request.
-- Do not invent arguments or function names.
-- Do not explain your reasoning.
-- Do not provide analysis or intermediate steps.
-- Do not include greetings or additional text.
-- Return exactly one JSON object.
-- Do not use Markdown or code fences.
-
-Expected output format:
-{{
-    "name": "function_name",
-    "parameters": {{
-        "parameter": "value"
-    }}
-}}
-
 User request:
 {user_prompt}
-""".strip()
+
+Response:"""
+
+    _INSTRUCTIONS = "\n".join([
+        "Choose one of the available functions for the user's request.",
+        "Extract its arguments from the user's request. "
+        "Do not execute the function.",
+        'Return only one JSON object with the keys "name" and '
+        '"parameters", in that order.',
+        "Write compact JSON on a single line, without spaces outside "
+        "string values.",
+        "Escape special characters as required by JSON.",
+        "Do not add extra keys, explanations or Markdown.",
+        "Use the exact function name and parameter names, and respect the "
+        "declared parameter types.",
+        "Never write JSON braces inside an argument value.",
+    ])

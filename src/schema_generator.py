@@ -1,0 +1,790 @@
+"""Schema-constrained generation of one function call."""
+
+import json
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from .token_constraints import (
+    COMPLETE_NUMBER_STATES,
+    NumberState,
+    StringState,
+    advance_number_bytes,
+    advance_string_state,
+)
+from .validator import FunctionDefinition
+from .vocabulary import Vocabulary
+
+NEGATIVE_INFINITY = float("-inf")
+MAXIMUM_STRING_TOKENS = 32
+MAXIMUM_NUMBER_TOKENS = 24
+
+
+class LanguageModel(Protocol):
+    """Operations that schema-constrained generation needs from the SDK."""
+
+    def encode(self, text: str) -> Any:
+        """Encode text into a tensor-like object of token identifiers."""
+        ...
+
+    def get_logits_from_input_ids(
+        self,
+        input_token_identifiers: list[int],
+    ) -> list[float]:
+        """Return the next-token logits for the given identifiers."""
+        ...
+
+    def get_path_to_vocab_file(self) -> str:
+        """Return the path to the tokenizer vocabulary file."""
+        ...
+
+
+@dataclass
+class GenerationBuffer:
+    """State accumulated while one function call is generated."""
+
+    input_token_identifiers: list[int]
+    output_bytes: bytearray = field(default_factory=bytearray)
+    remaining_tokens: int = 0
+
+
+class SchemaConstrainedGenerator:
+    """Generates a function call with schema-constrained decoding.
+
+    The model emits every byte of the JSON object, including the keys,
+    separators and closing braces. The engine never writes characters on its
+    own: it only masks out the tokens that would leave the schema or the JSON
+    grammar, and the model picks the highest-scoring allowed token.
+    """
+
+    def __init__(
+        self,
+        model: LanguageModel,
+        max_new_tokens: int = 256,
+    ) -> None:
+        """Load the vocabulary used to map tokens back to raw bytes.
+
+        Args:
+            model: Language model that scores the next token.
+            max_new_tokens: Maximum number of tokens the model may generate.
+        """
+        self.model = model
+        self.max_new_tokens = max_new_tokens
+        self.vocabulary = Vocabulary.from_vocabulary_file(
+            model.get_path_to_vocab_file()
+        )
+        self._allowed_token_identifiers_by_constraint: dict[
+            tuple[Any, ...],
+            frozenset[int],
+        ] = {}
+        self._token_identifiers_by_first_byte: dict[
+            int,
+            tuple[int, ...],
+        ] | None = None
+
+    def generate(
+        self,
+        prompt: str,
+        functions: list[FunctionDefinition],
+    ) -> str:
+        """Generate the JSON call for a prompt.
+
+        Args:
+            prompt: Complete prompt sent to the language model.
+            functions: Available function definitions.
+
+        Returns:
+            The generated JSON object.
+
+        Raises:
+            ValueError: If a value cannot be generated within the schema.
+        """
+        if not functions:
+            raise ValueError("At least one function definition is required.")
+
+        buffer = GenerationBuffer(
+            input_token_identifiers=self.model.encode(prompt)[0].tolist(),
+            remaining_tokens=self.max_new_tokens,
+        )
+
+        self._generate_literal(buffer, '{"name":"')
+        function = self._generate_function(buffer, functions)
+
+        parameter_definitions = list(function.parameters.items())
+
+        if not parameter_definitions:
+            self._generate_literal(buffer, ',"parameters":{}}')
+        else:
+            self._generate_literal(buffer, ',"parameters":{')
+
+            for parameter_index, (
+                parameter_name,
+                parameter_definition,
+            ) in enumerate(parameter_definitions):
+                if parameter_index > 0:
+                    self._generate_literal(buffer, ",")
+
+                encoded_name = json.dumps(
+                    parameter_name,
+                    ensure_ascii=False,
+                )
+                self._generate_literal(buffer, f"{encoded_name}:")
+
+                is_last_parameter = (
+                    parameter_index + 1 == len(parameter_definitions)
+                )
+                following_literal = "}}" if is_last_parameter else ","
+                self._generate_parameter_value(
+                    buffer,
+                    parameter_definition.type,
+                    following_literal,
+                )
+
+            self._generate_literal(buffer, "}}")
+
+        try:
+            return buffer.output_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                "The generated function call is not valid UTF-8."
+            ) from error
+
+    def _generate_literal(
+        self,
+        buffer: GenerationBuffer,
+        text: str,
+    ) -> None:
+        """Make the model emit an exact literal fragment.
+
+        The mask accepts only tokens that keep the generated bytes a prefix
+        of ``text``. The model still chooses the token, but every choice that
+        would leave the required schema is removed.
+
+        Args:
+            buffer: Generation state that receives the fragment.
+            text: Exact text that must appear in the output.
+        """
+        target_bytes = text.encode("utf-8")
+        accumulated_bytes = b""
+
+        while accumulated_bytes != target_bytes:
+            allowed_token_identifiers = self._prefix_token_identifiers(
+                "literal",
+                (target_bytes,),
+                accumulated_bytes,
+            )
+            accumulated_bytes += self._pick_token_bytes(
+                buffer,
+                allowed_token_identifiers,
+                f"literal {text!r}",
+            )
+
+    def _next_logits(self, buffer: GenerationBuffer) -> list[float]:
+        """Return the next-token logits, enforcing the token budget.
+
+        Args:
+            buffer: Generation state that holds the identifiers.
+
+        Returns:
+            The score of every token in the vocabulary.
+
+        Raises:
+            ValueError: If the token budget has been exhausted.
+        """
+        if buffer.remaining_tokens <= 0:
+            raise ValueError(
+                "The model did not complete the function call within the "
+                "token limit."
+            )
+
+        return self.model.get_logits_from_input_ids(
+            buffer.input_token_identifiers
+        )
+
+    def _accept_token(
+        self,
+        buffer: GenerationBuffer,
+        token_identifier: int,
+        token_bytes: bytes,
+    ) -> None:
+        """Append an accepted token to the input and to the output.
+
+        Args:
+            buffer: Generation state that receives the token.
+            token_identifier: Identifier of the accepted token.
+            token_bytes: Raw bytes represented by the token.
+        """
+        buffer.input_token_identifiers.append(token_identifier)
+        buffer.output_bytes.extend(token_bytes)
+        buffer.remaining_tokens -= 1
+
+    def _require_token_bytes(self, token_identifier: int) -> bytes:
+        """Return the bytes of a token identifier.
+
+        Args:
+            token_identifier: Identifier returned by the model.
+
+        Returns:
+            The raw bytes represented by the token.
+
+        Raises:
+            ValueError: If the identifier is not part of the vocabulary.
+        """
+        token_bytes = self.vocabulary.token_bytes(token_identifier)
+
+        if token_bytes is None:
+            raise ValueError(
+                "The model selected an unknown token identifier: "
+                f"{token_identifier}."
+            )
+
+        return token_bytes
+
+    @staticmethod
+    def _best_token(
+        logits: list[float],
+        allowed_token_identifiers: frozenset[int],
+        excluded_token_identifier: int | None = None,
+    ) -> tuple[int | None, float]:
+        """Return the highest-scoring allowed token.
+
+        Args:
+            logits: Score of every token in the vocabulary.
+            allowed_token_identifiers: Identifiers that may be selected.
+            excluded_token_identifier: Identifier that must not be selected,
+                used to compare a value against its own terminator.
+
+        Returns:
+            The best identifier and its score. The identifier is ``None``
+            when no allowed token fits in the logits.
+        """
+        best_identifier: int | None = None
+        best_score = NEGATIVE_INFINITY
+
+        for token_identifier in allowed_token_identifiers:
+            if token_identifier == excluded_token_identifier:
+                continue
+
+            if token_identifier >= len(logits):
+                continue
+
+            score = logits[token_identifier]
+
+            if score > best_score:
+                best_identifier = token_identifier
+                best_score = score
+
+        return best_identifier, best_score
+
+    def _pick_token_bytes(
+        self,
+        buffer: GenerationBuffer,
+        allowed_token_identifiers: frozenset[int],
+        description: str,
+    ) -> bytes:
+        """Select the best allowed token and append it to the output.
+
+        Args:
+            buffer: Generation state that receives the token.
+            allowed_token_identifiers: Identifiers that may be selected.
+            description: Human-readable name of the constrained fragment.
+
+        Returns:
+            The bytes represented by the selected token.
+
+        Raises:
+            ValueError: If no allowed token can be selected.
+        """
+        if not allowed_token_identifiers:
+            raise ValueError(
+                f"No token can continue the {description}."
+            )
+
+        logits = self._next_logits(buffer)
+        best_identifier, best_score = self._best_token(
+            logits,
+            allowed_token_identifiers,
+        )
+
+        if best_identifier is None or best_score == NEGATIVE_INFINITY:
+            raise ValueError(
+                f"No valid token is available for the {description}."
+            )
+
+        token_bytes = self._require_token_bytes(best_identifier)
+        self._accept_token(buffer, best_identifier, token_bytes)
+
+        return token_bytes
+
+    def _generate_function(
+        self,
+        buffer: GenerationBuffer,
+        functions: list[FunctionDefinition],
+    ) -> FunctionDefinition:
+        """Let the model choose one of the available function names.
+
+        Args:
+            buffer: Generation state that receives the name.
+            functions: Available function definitions.
+
+        Returns:
+            The selected function definition.
+
+        Raises:
+            ValueError: If the generated name does not match a definition.
+        """
+        functions_by_name = {
+            function.name: function for function in functions
+        }
+        target_bytes = tuple(
+            function_name.encode("utf-8") + b'"'
+            for function_name in functions_by_name
+        )
+        accumulated_bytes = b""
+
+        while accumulated_bytes not in target_bytes:
+            allowed_token_identifiers = self._prefix_token_identifiers(
+                "function name",
+                target_bytes,
+                accumulated_bytes,
+            )
+            accumulated_bytes += self._pick_token_bytes(
+                buffer,
+                allowed_token_identifiers,
+                "function name",
+            )
+
+        function_name = accumulated_bytes[:-1].decode("utf-8")
+        function = functions_by_name.get(function_name)
+
+        if function is None:
+            raise ValueError(
+                f"The generated function name is unknown: {function_name!r}."
+            )
+
+        return function
+
+    def _first_byte_token_identifiers(self) -> dict[int, tuple[int, ...]]:
+        """Group token identifiers by the first byte they represent.
+
+        Literal and name constraints only accept tokens whose first byte is
+        the next byte of a target. Indexing once avoids scanning the whole
+        vocabulary for every prefix that the model produces.
+
+        Returns:
+            A dictionary that maps a byte value to the identifiers of the
+            tokens that start with that byte.
+        """
+        if self._token_identifiers_by_first_byte is None:
+            identifiers_by_byte: dict[int, list[int]] = {}
+
+            for token_identifier in range(self.vocabulary.size):
+                token_bytes = self.vocabulary.token_bytes(token_identifier)
+
+                if not token_bytes:
+                    continue
+
+                identifiers_by_byte.setdefault(token_bytes[0], []).append(
+                    token_identifier
+                )
+
+            self._token_identifiers_by_first_byte = {
+                byte_value: tuple(token_identifiers)
+                for byte_value, token_identifiers
+                in identifiers_by_byte.items()
+            }
+
+        return self._token_identifiers_by_first_byte
+
+    def _prefix_token_identifiers(
+        self,
+        constraint_name: str,
+        target_bytes: tuple[bytes, ...],
+        accumulated_bytes: bytes,
+    ) -> frozenset[int]:
+        """Return the tokens that keep a text a prefix of some target.
+
+        Args:
+            constraint_name: Cache namespace of the constraint.
+            target_bytes: Complete texts that may be generated.
+            accumulated_bytes: Text generated so far.
+
+        Returns:
+            The identifiers that can be appended without leaving the targets.
+        """
+        cache_key = (
+            "prefix",
+            constraint_name,
+            target_bytes,
+            accumulated_bytes,
+        )
+        cached = self._allowed_token_identifiers_by_constraint.get(cache_key)
+
+        if cached is not None:
+            return cached
+
+        identifiers_by_first_byte = self._first_byte_token_identifiers()
+        candidate_identifiers: set[int] = set()
+
+        for target in target_bytes:
+            if len(accumulated_bytes) >= len(target):
+                continue
+
+            next_byte = target[len(accumulated_bytes)]
+            candidate_identifiers.update(
+                identifiers_by_first_byte.get(next_byte, ())
+            )
+
+        allowed_token_identifiers = set()
+
+        for token_identifier in candidate_identifiers:
+            token_bytes = self.vocabulary.token_bytes(token_identifier)
+
+            if not token_bytes:
+                continue
+
+            candidate_bytes = accumulated_bytes + token_bytes
+
+            if any(
+                target.startswith(candidate_bytes)
+                for target in target_bytes
+            ):
+                allowed_token_identifiers.add(token_identifier)
+
+        frozen_identifiers = frozenset(allowed_token_identifiers)
+        self._allowed_token_identifiers_by_constraint[
+            cache_key
+        ] = frozen_identifiers
+
+        return frozen_identifiers
+
+    def _generate_parameter_value(
+        self,
+        buffer: GenerationBuffer,
+        parameter_type: str,
+        following_literal: str,
+    ) -> None:
+        """Generate the value of one parameter.
+
+        Args:
+            buffer: Generation state that receives the value.
+            parameter_type: Type declared in the function definition.
+            following_literal: Exact text written after the value.
+
+        Raises:
+            ValueError: If the parameter type is not supported.
+        """
+        normalized_type = parameter_type.strip().lower()
+
+        if normalized_type == "string":
+            self._generate_string_value(buffer, following_literal)
+            return
+
+        if normalized_type == "number":
+            self._generate_number_value(
+                buffer,
+                following_literal,
+                allow_fraction_and_exponent=True,
+            )
+            return
+
+        if normalized_type == "integer":
+            self._generate_number_value(
+                buffer,
+                following_literal,
+                allow_fraction_and_exponent=False,
+            )
+            return
+
+        if normalized_type == "boolean":
+            self._generate_boolean_value(buffer)
+            return
+
+        if normalized_type == "null":
+            self._generate_literal(buffer, "null")
+            return
+
+        raise ValueError(
+            f"Unsupported parameter type: {parameter_type!r}."
+        )
+
+    def _generate_string_value(
+        self,
+        buffer: GenerationBuffer,
+        following_literal: str,
+    ) -> None:
+        """Generate a JSON string, letting the model write every token.
+
+        The model writes the opening quote, the body and, normally, the
+        closing quote. If it prefers the structural character that follows
+        the value, the mask is narrowed to the closing quote so the model
+        ends the string itself instead of leaving it open.
+
+        Args:
+            buffer: Generation state that receives the string.
+            following_literal: Exact text written after the value.
+        """
+        self._generate_literal(buffer, '"')
+        state = StringState()
+        generated_token_count = 0
+        terminator_identifier = (
+            self.vocabulary.single_byte_token_identifiers.get(
+                ord(following_literal[0])
+            )
+        )
+
+        while not state.closed:
+            logits = self._next_logits(buffer)
+            allowed_token_identifiers = self._string_token_identifiers(state)
+            best_identifier, best_score = self._best_token(
+                logits,
+                allowed_token_identifiers,
+                terminator_identifier,
+            )
+
+            prefers_terminator = (
+                terminator_identifier is not None
+                and terminator_identifier < len(logits)
+                and logits[terminator_identifier] >= best_score
+            )
+            can_close_string = (
+                not state.escape_pending
+                and state.hexadecimal_digits_remaining == 0
+            )
+
+            if can_close_string and (
+                prefers_terminator
+                or generated_token_count >= MAXIMUM_STRING_TOKENS
+            ):
+                self._emit_closing_quote(buffer, logits)
+                return
+
+            if (
+                best_identifier is None
+                or best_score == NEGATIVE_INFINITY
+            ):
+                raise ValueError(
+                    "No valid token is available for a string value."
+                )
+
+            token_bytes = self._require_token_bytes(best_identifier)
+            next_state = advance_string_state(state, token_bytes)
+
+            if next_state is None:
+                raise ValueError(
+                    "The model selected a token that is not valid inside a "
+                    "JSON string."
+                )
+
+            self._accept_token(buffer, best_identifier, token_bytes)
+            generated_token_count += 1
+            state = next_state
+
+    def _emit_closing_quote(
+        self,
+        buffer: GenerationBuffer,
+        logits: list[float],
+    ) -> None:
+        """Let the model emit the quote that closes a string value.
+
+        The mask is narrowed to the single closing-quote token, so the model
+        still produces the character while no other choice is valid.
+
+        Args:
+            buffer: Generation state that receives the quote.
+            logits: Scores already computed for the current position.
+
+        Raises:
+            ValueError: If the vocabulary has no closing quote token.
+        """
+        closing_quote_identifiers = self._prefix_token_identifiers(
+            "closing quote",
+            (b'"',),
+            b"",
+        )
+        best_identifier, best_score = self._best_token(
+            logits,
+            closing_quote_identifiers,
+        )
+
+        if best_identifier is None or best_score == NEGATIVE_INFINITY:
+            raise ValueError(
+                "No closing quote token is available for a string value."
+            )
+
+        token_bytes = self._require_token_bytes(best_identifier)
+        self._accept_token(buffer, best_identifier, token_bytes)
+
+    def _string_token_identifiers(
+        self,
+        state: StringState,
+    ) -> frozenset[int]:
+        """Return the tokens that can continue a JSON string body.
+
+        Args:
+            state: Current grammar state of the string.
+
+        Returns:
+            The identifiers that keep the string valid.
+        """
+        cache_key = ("string", state)
+        cached = self._allowed_token_identifiers_by_constraint.get(cache_key)
+
+        if cached is not None:
+            return cached
+
+        allowed_token_identifiers = set()
+
+        for token_identifier in range(self.vocabulary.size):
+            token_bytes = self.vocabulary.token_bytes(token_identifier)
+
+            if token_bytes is None:
+                continue
+
+            if advance_string_state(state, token_bytes) is not None:
+                allowed_token_identifiers.add(token_identifier)
+
+        frozen_identifiers = frozenset(allowed_token_identifiers)
+        self._allowed_token_identifiers_by_constraint[
+            cache_key
+        ] = frozen_identifiers
+
+        return frozen_identifiers
+
+    def _generate_number_value(
+        self,
+        buffer: GenerationBuffer,
+        following_literal: str,
+        allow_fraction_and_exponent: bool,
+    ) -> None:
+        """Generate a JSON number and stop at the following literal.
+
+        The model may either extend the number or write the first character
+        of the following literal. The second option is only offered once the
+        number is complete, so the value can never be truncated in the middle
+        of its grammar.
+
+        Args:
+            buffer: Generation state that receives the number.
+            following_literal: Exact text written after the value.
+            allow_fraction_and_exponent: Whether decimal and exponent parts
+                are allowed.
+        """
+        state = NumberState.START
+        generated_token_count = 0
+
+        while True:
+            logits = self._next_logits(buffer)
+            allowed_token_identifiers = self._number_token_identifiers(
+                state,
+                allow_fraction_and_exponent,
+            )
+            best_identifier, best_score = self._best_token(
+                logits,
+                allowed_token_identifiers,
+            )
+
+            if state in COMPLETE_NUMBER_STATES:
+                terminator_identifier = (
+                    self.vocabulary.single_byte_token_identifiers.get(
+                        ord(following_literal[0])
+                    )
+                )
+
+                if (
+                    generated_token_count >= MAXIMUM_NUMBER_TOKENS
+                    or (
+                        terminator_identifier is not None
+                        and terminator_identifier < len(logits)
+                        and logits[terminator_identifier] >= best_score
+                    )
+                ):
+                    return
+
+            if (
+                best_identifier is None
+                or best_score == NEGATIVE_INFINITY
+            ):
+                raise ValueError(
+                    "No valid token is available for a number value."
+                )
+
+            token_bytes = self._require_token_bytes(best_identifier)
+            next_state = advance_number_bytes(
+                state,
+                token_bytes,
+                allow_fraction_and_exponent,
+            )
+
+            if next_state is None:
+                raise ValueError(
+                    "The model selected a token that is not valid inside a "
+                    "JSON number."
+                )
+
+            self._accept_token(buffer, best_identifier, token_bytes)
+            generated_token_count += 1
+            state = next_state
+
+    def _number_token_identifiers(
+        self,
+        state: NumberState,
+        allow_fraction_and_exponent: bool,
+    ) -> frozenset[int]:
+        """Return the tokens that can continue a JSON number.
+
+        Args:
+            state: Current grammar state of the number.
+            allow_fraction_and_exponent: Whether decimal and exponent parts
+                are allowed.
+
+        Returns:
+            The identifiers that keep the number valid.
+        """
+        cache_key = ("number", state, allow_fraction_and_exponent)
+        cached = self._allowed_token_identifiers_by_constraint.get(cache_key)
+
+        if cached is not None:
+            return cached
+
+        allowed_token_identifiers = set()
+
+        for token_identifier in range(self.vocabulary.size):
+            token_bytes = self.vocabulary.token_bytes(token_identifier)
+
+            if token_bytes is None:
+                continue
+
+            if advance_number_bytes(
+                state,
+                token_bytes,
+                allow_fraction_and_exponent,
+            ) is not None:
+                allowed_token_identifiers.add(token_identifier)
+
+        frozen_identifiers = frozenset(allowed_token_identifiers)
+        self._allowed_token_identifiers_by_constraint[
+            cache_key
+        ] = frozen_identifiers
+
+        return frozen_identifiers
+
+    def _generate_boolean_value(self, buffer: GenerationBuffer) -> None:
+        """Generate a JSON boolean.
+
+        Args:
+            buffer: Generation state that receives the boolean.
+        """
+        target_bytes = (b"true", b"false")
+        accumulated_bytes = b""
+
+        while accumulated_bytes not in target_bytes:
+            allowed_token_identifiers = self._prefix_token_identifiers(
+                "boolean",
+                target_bytes,
+                accumulated_bytes,
+            )
+            accumulated_bytes += self._pick_token_bytes(
+                buffer,
+                allowed_token_identifiers,
+                "boolean value",
+            )

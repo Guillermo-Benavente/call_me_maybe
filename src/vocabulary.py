@@ -49,6 +49,7 @@ class Vocabulary:
     ) -> None:
         """Store the token byte table built from the vocabulary file."""
         self._token_bytes_by_identifier = token_bytes_by_identifier
+        self._single_byte_token_identifiers: dict[int, int] | None = None
 
     @classmethod
     def from_vocabulary_file(cls, vocabulary_file_path: str) -> "Vocabulary":
@@ -105,3 +106,29 @@ class Vocabulary:
     def size(self) -> int:
         """Return the number of identifiers stored in the vocabulary."""
         return len(self._token_bytes_by_identifier)
+
+    @property
+    def single_byte_token_identifiers(self) -> dict[int, int]:
+        """Return the identifier that represents each single-byte token.
+
+        Returns:
+            A dictionary that maps a byte value to the identifier of the
+            token whose bytes are exactly that byte.
+        """
+        if self._single_byte_token_identifiers is None:
+            identifiers_by_byte: dict[int, int] = {}
+
+            for token_identifier, token_bytes in enumerate(
+                self._token_bytes_by_identifier
+            ):
+                if token_bytes is None or len(token_bytes) != 1:
+                    continue
+
+                identifiers_by_byte.setdefault(
+                    token_bytes[0],
+                    token_identifier,
+                )
+
+            self._single_byte_token_identifiers = identifiers_by_byte
+
+        return self._single_byte_token_identifiers
