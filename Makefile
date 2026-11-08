@@ -1,5 +1,5 @@
 # Use STORAGE_DIR to specify a custom storage directory for the virtual environment, cache, and models.
-# Example: make install STORAGE_DIR=/mnt/storage/callmemaybe
+# Example: make install STORAGE_DIR=/sgoinfre/students/gbenaven/callmemaybe
 STORAGE_DIR ?= $(CURDIR)
 
 VENV_DIR      := $(STORAGE_DIR)/.venv

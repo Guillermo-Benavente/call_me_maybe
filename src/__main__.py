@@ -33,7 +33,7 @@ def main() -> None:
         print(f"Number of logits: {len(logits)}")
         print(f"First logits: {logits[:5]}")
         
-        generated = llm.generate(input_ids, max_new_tokens=512)
+        generated = llm.generate_json(input_ids)
         decoded = llm.decode(generated)
         
         print(f"\nDecoded prompt:\n{decoded}")

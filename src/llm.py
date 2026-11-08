@@ -1,5 +1,5 @@
+import json
 from typing import Any
-
 from llm_sdk.llm_sdk import Small_LLM_Model
 
 
@@ -25,20 +25,19 @@ class LLM:
     def get_tokenizer_path(self) -> str:
         return self._llm.get_path_to_tokenizer_file()
 
-    def generate(
-    self,
-    input_ids: list[int],
-    max_new_tokens: int = 512,
-    eos_ids: tuple[int, ...] = (151645, 151643), # <|im_end|>, <|endoftext|>
-    ) -> list[int]:
+    def generate_json(self, input_ids: list[int]) -> list[int]:
         ids = list(input_ids)
         generated: list[int] = []
-        for _ in range(max_new_tokens):
-            logits = self.get_logits(ids)
+        valid_json = ""
+        while not isinstance(valid_json,  dict):
+            logits = self.get_logits(ids + generated)
             next_id = max(range(len(logits)), key=logits.__getitem__)
-            ids.append(next_id)
-            print(self.decode([next_id]), end="", flush=True)
+            print(f"{next_id} - ", end="", flush=True)
+            print(self.decode([next_id]), flush=True)
             generated.append(next_id)
-            if next_id in eos_ids:
-                break
+            try:
+                valid_json = json.loads(self.decode(generated))
+            except json.JSONDecodeError:
+                continue
+
         return generated
