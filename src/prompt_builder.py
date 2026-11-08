@@ -12,20 +12,14 @@ class PromptBuilder:
     ) -> str:
         """Build the complete model prompt."""
 
-        return f"""
-You are a function calling assistant.
-
-Your task is to select the most appropriate function
-to fulfill the user's request.
-
-You MUST follow the provided function definitions.
-Return only valid JSON without explanations or markdown.
-
-FUNCTION DEFINITIONS:
-{functions_json}
-
-USER REQUEST:
-{user_prompt}
-
-JSON RESPONSE:
-"""
+        return (
+            "You are a function calling assistant.\n"
+            "Choose exactly one function from the list and fill its parameters.\n"
+            "Answer with ONE JSON object and nothing else.\n"
+            "No markdown, no code fences, no explanations, no extra text.\n\n"
+            f"Functions:\n{functions_json}\n\n"
+            f"User request: {user_prompt}\n\n"
+            "Required output format:\n"
+            '{"name": "<function_name>", "parameters": {<arguments>}}\n\n'
+            "JSON:\n"
+        )

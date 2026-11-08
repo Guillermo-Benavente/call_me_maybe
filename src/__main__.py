@@ -33,7 +33,8 @@ def main() -> None:
         print(f"Number of logits: {len(logits)}")
         print(f"First logits: {logits[:5]}")
         
-        decoded = llm.decode(input_ids)
+        generated = llm.generate(input_ids, max_new_tokens=512)
+        decoded = llm.decode(generated)
         
         print(f"\nDecoded prompt:\n{decoded}")
     except ValueError as error:

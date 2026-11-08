@@ -24,3 +24,21 @@ class LLM:
 
     def get_tokenizer_path(self) -> str:
         return self._llm.get_path_to_tokenizer_file()
+
+    def generate(
+    self,
+    input_ids: list[int],
+    max_new_tokens: int = 512,
+    eos_ids: tuple[int, ...] = (151645, 151643), # <|im_end|>, <|endoftext|>
+    ) -> list[int]:
+        ids = list(input_ids)
+        generated: list[int] = []
+        for _ in range(max_new_tokens):
+            logits = self.get_logits(ids)
+            next_id = max(range(len(logits)), key=logits.__getitem__)
+            ids.append(next_id)
+            print(self.decode([next_id]), end="", flush=True)
+            generated.append(next_id)
+            if next_id in eos_ids:
+                break
+        return generated
