@@ -6,3 +6,4 @@ llm_sdk/
 *.pyc
 .pytest_cache/
 .mypy_cache/
+models/

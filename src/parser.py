@@ -1,4 +1,4 @@
-import argparse
+from argparse import Namespace, ArgumentParser
 import json
 from pathlib import Path
 from typing import Any
@@ -39,16 +39,19 @@ class Parser:
     def __init__(self) -> None:
         """Parse arguments and load input files."""
 
-        self.args = self._parse_arguments()
+        self.args: Namespace = self._parse_arguments()
 
-        self.input_path = self.args.input
-        self.functions_path = self.args.functions_definition
-        self.output_path = self.args.output
+        self.input_path: Path = self.args.input
+        self.functions_path: Path = self.args.functions_definition
+        self.output_path: Path = self.args.output
 
         self.prompts: list[Prompt] = []
         self.functions: list[FunctionDefinition] = []
 
         try:
+            self.prompts_json: str = self.input_path.read_text(encoding="utf-8")
+            self.functions_json: str = self.functions_path.read_text(encoding="utf-8")
+            
             self.prompts = self._load_json(
                 self.input_path,
                 list[Prompt],
@@ -63,12 +66,12 @@ class Parser:
             raise ValueError(f"Input configuration error: {error}") from error
 
     @staticmethod
-    def _parse_arguments() -> argparse.Namespace:
+    def _parse_arguments() -> Namespace:
         """Parse command-line arguments."""
 
-        project_root = Path(__file__).resolve().parent.parent
+        project_root: Path = Path(__file__).resolve().parent.parent
 
-        arg_parser = argparse.ArgumentParser(
+        arg_parser: ArgumentParser = ArgumentParser(
             description="Call Me Maybe - Function Calling"
         )
 
@@ -99,7 +102,7 @@ class Parser:
         if not file_path.is_file():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        adapter = TypeAdapter(schema)
+        adapter:TypeAdapter[Any] = TypeAdapter(schema)
 
         return adapter.validate_json(
             file_path.read_text(encoding="utf-8")
