@@ -1,56 +1,50 @@
-SHELL := /bin/bash
-.DEFAULT_GOAL := install
+# Use STORAGE_DIR to specify a custom storage directory for the virtual environment, cache, and models.
+# Example: make install STORAGE_DIR=/mnt/storage/callmemaybe
+STORAGE_DIR ?= $(CURDIR)
 
-PROJECT_DIR := $(CURDIR)
-SGOINFRE ?= $(HOME)/sgoinfre
-VENV_DIR ?= $(SGOINFRE)/venvs/call-me-maybe
-PYTHON ?= python3.10
-THREADS ?= 2
+VENV_DIR      := $(STORAGE_DIR)/.venv
+UV_CACHE_DIR  ?= $(STORAGE_DIR)/.uv-cache
+MODEL_DIR     ?= $(STORAGE_DIR)/models
 
-export OMP_NUM_THREADS := $(THREADS)
-export MKL_NUM_THREADS := $(THREADS)
-export UV_CACHE_DIR ?= $(SGOINFRE)/uv-cache
-export UV_LINK_MODE := copy
+UV := $(shell command -v uv 2>/dev/null || \
+	printf '%s' "$(HOME)/.local/bin/uv")
+
+export UV_CACHE_DIR
 export UV_PROJECT_ENVIRONMENT := $(VENV_DIR)
-export HF_HOME ?= $(SGOINFRE)/huggingface_cache
-export HF_HUB_CACHE ?= $(HF_HOME)/hub
-export HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
-export TMPDIR := $(SGOINFRE)/tmp
+export HF_HOME := $(MODEL_DIR)
 
-.PHONY: install run debug clean lint info prepare
+.PHONY: ensure-uv install run debug clean lint lint-strict
 
-prepare:
-	mkdir -p "$(UV_CACHE_DIR)" "$(HF_HUB_CACHE)" "$(HF_DATASETS_CACHE)" \
-		"$(TMPDIR)" "$(dir $(VENV_DIR))"
+ensure-uv:
+	@if ! command -v uv >/dev/null 2>&1 && [ ! -x "$(UV)" ]; then \
+		echo "Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+	fi
 
-install: prepare
-	uv sync --python "$(PYTHON)"
+install: ensure-uv
+	$(UV) sync
 
-reinstall: prepare
-	uv sync --reinstall
+run: ensure-uv
+	$(UV) run python -m src
 
-run: prepare
-	uv run --python "$(PYTHON)" python -u -m src
-
-debug: prepare
-	uv run --python "$(PYTHON)" python -m pdb -m src
+debug: ensure-uv
+	$(UV) run python -m pdb -m src
 
 clean:
-	find src llm_sdk -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf .mypy_cache .pytest_cache .ruff_cache
+	@find . -type d \( -name ".git" -o -name ".venv" \) -prune -o \
+		-type d \( -name "__pycache__" -o -name ".mypy_cache" \
+		-o -name ".pytest_cache" \) -prune -exec rm -rf {} +
+	@find . -type f -name "*.pyc" -delete
 
-lint: prepare
-	uv run --python "$(PYTHON)" flake8 .
-	uv run --python "$(PYTHON)" mypy . --warn-return-any \
-		--warn-unused-ignores --ignore-missing-imports \
-		--disallow-untyped-defs --check-untyped-defs
+lint: ensure-uv
+	$(UV) run flake8 .
+	$(UV) run mypy . \
+		--warn-return-any \
+		--warn-unused-ignores \
+		--ignore-missing-imports \
+		--disallow-untyped-defs \
+		--check-untyped-defs
 
-info:
-	@echo "Project: $(PROJECT_DIR)"
-	@echo "Storage: $(SGOINFRE)"
-	@echo "UV cache: $(UV_CACHE_DIR)"
-	@echo "Hugging Face cache: $(HF_HOME)"
-	@echo "Hugging Face Hub cache: $(HF_HUB_CACHE)"
-	@echo "Virtual environment: $(UV_PROJECT_ENVIRONMENT)"
-	@echo "Temporary files: $(TMPDIR)"
-	@df -h "$(SGOINFRE)"
+lint-strict: ensure-uv
+	$(UV) run flake8 .
+	$(UV) run mypy . --strict

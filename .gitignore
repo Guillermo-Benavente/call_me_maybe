@@ -1,7 +1,8 @@
 .venv
+.uv-cache
 data/
 llm_sdk/
-__pycache__/
+*/__pycache__/
 *.pyc
 .pytest_cache/
 .mypy_cache/
