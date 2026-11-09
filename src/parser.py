@@ -49,8 +49,8 @@ class Parser:
         self.functions: list[FunctionDefinition] = []
 
         try:
-            self.prompts_json: str = self.input_path.read_text(encoding="utf-8")
-            self.functions_json: str = self.functions_path.read_text(encoding="utf-8")
+            self.prompts_json: str = self.compact_json(self.input_path)
+            self.functions_json: str = self.compact_json(self.functions_path)
             
             self.prompts = self._load_json(
                 self.input_path,
@@ -107,3 +107,8 @@ class Parser:
         return adapter.validate_json(
             file_path.read_text(encoding="utf-8")
         )
+
+    def compact_json(self, file: Path) -> str:
+        data = json.loads(file.read_text(encoding="utf-8"))
+        compact_json = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        return compact_json

@@ -36,14 +36,6 @@ def main() -> None:
             )
 
             input_ids = llm.encode(complete_prompt).squeeze(0).tolist()
-
-            print(f"Input tokens: {len(input_ids)}")
-
-            logits = llm.get_logits(input_ids)
-
-            print(f"Number of logits: {len(logits)}")
-            print(f"First logits: {logits[:5]}")
-
             generated = llm.generate_json(input_ids)
             decoded = llm.decode(generated)
 

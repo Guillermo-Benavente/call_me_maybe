@@ -1,7 +1,3 @@
-import json
-from typing import Any
-
-
 class PromptBuilder:
     """Build prompts for function calling."""
 
