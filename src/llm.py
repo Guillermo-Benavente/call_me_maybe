@@ -1,11 +1,13 @@
-import json
+import numpy as np
 from typing import Any
+from src.validator import Validator
 from llm_sdk.llm_sdk import Small_LLM_Model
 
 
 class LLM:
     def __init__(self, model_name: str = "Qwen/Qwen3-0.6B") -> None:
         self._llm = Small_LLM_Model(model_name, device="cpu")
+        self.json_grammar = Validator(self)
 
     def encode(self, text: str) -> Any:
         return self._llm.encode(text)
@@ -26,18 +28,28 @@ class LLM:
         return self._llm.get_path_to_tokenizer_file()
 
     def generate_json(self, input_ids: list[int]) -> list[int]:
-        ids = list(input_ids)
-        generated: list[int] = []
-        valid_json = ""
-        while not isinstance(valid_json,  dict):
-            logits = self.get_logits(ids + generated)
-            next_id = max(range(len(logits)), key=logits.__getitem__)
-            print(f"{next_id} - ", end="", flush=True)
-            print(self.decode([next_id]), flush=True)
-            generated.append(next_id)
-            try:
-                valid_json = json.loads(self.decode(generated))
-            except json.JSONDecodeError:
-                continue
+        generated = []
+        grammar = self.json_grammar.initial_state()
+        
+        logits = np.asarray(
+            self.get_logits(input_ids),
+            dtype=np.float32
+        )
+        
+        if grammar.all_tokens is None:
+            grammar.initialize_vocab(len(logits))
 
-        return generated
+        while True:
+            allowed = grammar.allowed_tokens()
+            next_id = int(allowed[np.argmax(logits[allowed])])
+            
+            generated.append(next_id)
+            grammar.advance(next_id)
+
+            if grammar.is_accepting:
+                return generated
+            
+            logits = np.asarray(
+                self.get_logits(input_ids + generated),
+                dtype=np.float32
+            )
