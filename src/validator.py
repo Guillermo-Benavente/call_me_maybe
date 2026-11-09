@@ -7,7 +7,7 @@ import numpy as np
 class Validator:
 
     def __init__(self, llm):
-        from llm import LLM 
+        from src.llm import LLM 
         self.llm: LLM = llm
         self.buffer = ""
         self.generated = []
