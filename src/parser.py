@@ -32,6 +32,7 @@ class FunctionDefinition(BaseModel):
     parameters: dict[str, ParameterDefinition]
     returns: ParameterDefinition
 
+
 class FunctionGenerated(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,7 +58,7 @@ class Parser:
         try:
             self.prompts_json: str = self.compact_json(self.input_path)
             self.functions_json: str = self.compact_json(self.functions_path)
-            
+
             self.prompts = self._load_json(
                 self.input_path,
                 list[Prompt],
@@ -108,20 +109,24 @@ class Parser:
         if not file_path.is_file():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        adapter:TypeAdapter[Any] = TypeAdapter(schema)
+        adapter: TypeAdapter[Any] = TypeAdapter(schema)
 
         return adapter.validate_json(
             file_path.read_text(encoding="utf-8")
         )
-    
+
     @staticmethod
     def validate_str_to_json(possible_json: str, schema: Any) -> Any:
-        adapter:TypeAdapter[Any] = TypeAdapter(schema)
+        adapter: TypeAdapter[Any] = TypeAdapter(schema)
 
         return adapter.validate_json(possible_json)
 
     @staticmethod
     def compact_json(file: Path) -> str:
         data = json.loads(file.read_text(encoding="utf-8"))
-        final_json = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        final_json = json.dumps(
+            data, ensure_ascii=False,
+            separators=(",", ":")
+        )
+
         return final_json

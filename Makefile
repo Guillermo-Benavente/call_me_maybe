@@ -37,8 +37,8 @@ clean:
 	@find . -type f -name "*.pyc" -delete
 
 lint: ensure-uv
-	$(UV) run flake8 .
-	$(UV) run mypy . \
+	$(UV) run flake8 src
+	$(UV) run mypy src \
 		--warn-return-any \
 		--warn-unused-ignores \
 		--ignore-missing-imports \
@@ -46,5 +46,5 @@ lint: ensure-uv
 		--check-untyped-defs
 
 lint-strict: ensure-uv
-	$(UV) run flake8 .
-	$(UV) run mypy . --strict
+	$(UV) run flake8 src
+	$(UV) run mypy src --strict

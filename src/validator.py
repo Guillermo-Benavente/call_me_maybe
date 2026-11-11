@@ -1,34 +1,24 @@
 
 import json
-import time
 import numpy as np
+from typing import Any
 
 
 class Validator:
 
-    def __init__(self, llm):
-        from src.llm import LLM 
+    def __init__(self, llm: Any) -> None:
+        from src.llm import LLM
         self.llm: LLM = llm
         self.buffer = ""
-        self.generated = []
+        self.generated: list[Any] = []
 
         self.allowed_chars = set('{}[]":,0123456789.truefalsn- ')
-        self.structural_tokens = None
-        self.all_tokens = None
+        self.structural_tokens: np.ndarray | None = None
+        self.all_tokens: np.ndarray | None = None
 
-        self.timings = {
-            "vocab_decode": 0.0,
-            "inside_string": 0.0,
-            "advance_decode": 0.0,
-            "json_loads": 0.0
-        }
-
-    def initialize_vocab(self, vocab_size):
+    def initialize_vocab(self, vocab_size: int) -> None:
         self.all_tokens = np.arange(vocab_size, dtype=np.int64)
-
         structural = []
-
-        start = time.perf_counter()
 
         for token_id in range(vocab_size):
             text = self.llm.decode([token_id])
@@ -36,26 +26,19 @@ class Validator:
             if text and all(char in self.allowed_chars for char in text):
                 structural.append(token_id)
 
-        self.timings["vocab_decode"] += time.perf_counter() - start
-
         self.structural_tokens = np.array(
             structural,
             dtype=np.int64
         )
 
-    def initial_state(self):
+    def initial_state(self) -> "Validator":
         self.buffer = ""
         self.generated = []
-
-        for key in self.timings:
-            self.timings[key] = 0.0
 
         return self
 
     @property
-    def inside_string(self):
-        start = time.perf_counter()
-
+    def inside_string(self) -> bool:
         escaped = False
         inside = False
 
@@ -71,34 +54,25 @@ class Validator:
             if char == '"':
                 inside = not inside
 
-        self.timings["inside_string"] += time.perf_counter() - start
-
         return inside
 
-    def allowed_tokens(self):
+    def allowed_tokens(self) -> np.ndarray | None:
         if self.inside_string:
             return self.all_tokens
 
         return self.structural_tokens
 
-    def advance(self, token_id):
+    def advance(self, token_id: Any) -> "Validator":
         self.generated.append(token_id)
-
-        start = time.perf_counter()
         self.buffer = self.llm.decode(self.generated)
-        self.timings["advance_decode"] += time.perf_counter() - start
 
         return self
 
     @property
-    def is_accepting(self):
-        start = time.perf_counter()
-
+    def is_accepting(self) -> bool:
         try:
             result = isinstance(json.loads(self.buffer), dict)
         except json.JSONDecodeError:
             result = False
-
-        self.timings["json_loads"] += time.perf_counter() - start
 
         return result

@@ -10,8 +10,8 @@ class PromptBuilder:
 
         return (
             "You are a function calling assistant.\n"
-            "Choose exactly one function from the list and fill its parameters.\n"
-            "Answer with ONE JSON object and nothing else.\n"
+            "Choose exactly one function from the list and fill its "
+            "parameters.\n Answer with ONE JSON object and nothing else.\n"
             "No markdown, no code fences, no explanations, no extra text.\n\n"
             f"Functions: {functions_json}\n\n"
             f"User request: {user_prompt}\n\n"
