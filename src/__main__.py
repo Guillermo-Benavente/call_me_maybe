@@ -1,6 +1,6 @@
 import time
 from src.llm import LLM
-from src.parser import Parser
+from src.parser import Parser, FunctionGenerated
 from src.prompt_builder import PromptBuilder
 from src.output_file import OutputFile
 
@@ -41,7 +41,9 @@ def main() -> None:
             generated = llm.generate_json(input_ids)
             decoded = llm.decode(generated)
 
-            output_file.functions.append(decoded)
+            output_file.functions.append(
+                Parser.validate_str_to_json(decoded, FunctionGenerated)
+            )
 
             elapsed = time.perf_counter() - start
             minutes, seconds = divmod(int(elapsed), 60)
@@ -56,8 +58,7 @@ def main() -> None:
         print(f"Finished processing {total_prompts} prompts")
         print(f"Total execution time: {minutes} min {seconds} s")
         print(f"{'=' * 50}")
-
-        print("OutputFile", output_file.functions)
+        output_file.create_output(parser.output_path)
 
     except ValueError as error:
         print(f"Error: {error}")

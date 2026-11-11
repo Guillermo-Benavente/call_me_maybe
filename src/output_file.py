@@ -1,21 +1,20 @@
 import json
 from pathlib import Path
+from src.parser import Prompt, FunctionGenerated
 
 class OutputFile():
 	def __init__(self, prompts):
-		self.prompts = prompts
-		self.functions = []
+		self.prompts: list[Prompt] = prompts
+		self.functions: list[FunctionGenerated] = []
 
 	def create_output(self, output_path: Path):
 		output = []
 		for index, prompt in enumerate(self.prompts):
-			prompt_json = json.loads(prompt)
-			function_json = json.loads(self.functions[index])
 			output_json = {
-				"prompt" : prompt_json['prompt'],
-				"name" : function_json['name'],
-				"parameters" : function_json['parameters']
+				"prompt" : prompt.prompt,
+				"name" : self.functions[index].name,
+				"parameters" : self.functions[index].parameters
 			}
 			output.append(output_json)
 		with open(output_path, "w", encoding="utf-8") as file:
-			file.writelines(output)
+			json.dump(output, file, ensure_ascii=False, indent=4)

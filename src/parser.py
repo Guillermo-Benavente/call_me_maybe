@@ -32,6 +32,12 @@ class FunctionDefinition(BaseModel):
     parameters: dict[str, ParameterDefinition]
     returns: ParameterDefinition
 
+class FunctionGenerated(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(strict=True, min_length=1)
+    parameters: dict[str, int | float | str]
+
 
 class Parser:
     """Parse command-line arguments and validate input JSON files."""
@@ -107,8 +113,15 @@ class Parser:
         return adapter.validate_json(
             file_path.read_text(encoding="utf-8")
         )
+    
+    @staticmethod
+    def validate_str_to_json(possible_json: str, schema: Any) -> Any:
+        adapter:TypeAdapter[Any] = TypeAdapter(schema)
 
-    def compact_json(self, file: Path) -> str:
+        return adapter.validate_json(possible_json)
+
+    @staticmethod
+    def compact_json(file: Path) -> str:
         data = json.loads(file.read_text(encoding="utf-8"))
-        compact_json = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-        return compact_json
+        final_json = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        return final_json
