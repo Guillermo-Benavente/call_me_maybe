@@ -6,6 +6,16 @@ from src.output_file import OutputFile
 
 
 def main() -> None:
+    """Execute the function calling pipeline.
+
+    Loads the input configurations, initializes the language model,
+    processes each prompt, validates the generated function calls,
+    measures execution times, and saves the results to an output file.
+
+    Raises:
+        ValueError: If an input configuration or generated function call
+            contains invalid data.
+    """
     try:
         print(f"{'*' * 10} Loading input files {'*' * 10}")
         parser = Parser()
