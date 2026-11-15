@@ -71,8 +71,6 @@ Synchronize the project dependencies:
 uv sync
 ```
 
-The `llm_sdk` package must be available in the project directory, alongside the `src` directory.
-
 ### Execution
 
 Run the project using:
@@ -114,6 +112,11 @@ The project can also use a Makefile to automate common development tasks:
 
 ```text
 .
+├── llm_sdk
+├── data
+│   └── input
+│       ├── function_calling_tests.json
+│       └── functions_definition.json
 ├── src/
 │   ├── __init__.py
 │   ├── __main__.py

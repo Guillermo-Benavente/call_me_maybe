@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import numpy.typing as npt
 from typing import Any
 
 
@@ -18,8 +19,8 @@ class Validator:
         self.generated: list[Any] = []
 
         self.allowed_chars = set('{}[]":,0123456789.truefalsn- ')
-        self.structural_tokens: np.ndarray | None = None
-        self.all_tokens: np.ndarray | None = None
+        self.structural_tokens: npt.NDArray[np.int64] | None = None
+        self.all_tokens: npt.NDArray[np.int64] | None = None
 
     def initialize_vocab(self, vocab_size: int) -> None:
         """Initialize the vocabulary token arrays.
@@ -83,7 +84,7 @@ class Validator:
 
         return inside
 
-    def allowed_tokens(self) -> np.ndarray | None:
+    def allowed_tokens(self) -> npt.NDArray[np.int64] | None:
         """Return the tokens allowed in the current generation state.
 
         All vocabulary tokens are allowed inside JSON strings.

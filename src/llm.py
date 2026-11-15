@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 from typing import Any
 
 from src.validator import Validator
@@ -110,7 +111,7 @@ class LLM:
             grammar.initialize_vocab(len(logits))
 
         while True:
-            allowed: np.ndarray | None = grammar.allowed_tokens()
+            allowed: npt.NDArray[np.int64] | None = grammar.allowed_tokens()
 
             if allowed is None or allowed.size == 0:
                 raise RuntimeError("Grammar has no allowed tokens")

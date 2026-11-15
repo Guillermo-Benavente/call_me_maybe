@@ -4,12 +4,14 @@ STORAGE_DIR ?= $(CURDIR)
 
 VENV_DIR      := $(STORAGE_DIR)/.venv
 UV_CACHE_DIR  ?= $(STORAGE_DIR)/.uv-cache
+MYPY_CACHE_DIR ?= $(STORAGE_DIR)/.mypy_cache
 MODEL_DIR     ?= $(STORAGE_DIR)/models
 
 UV := $(shell command -v uv 2>/dev/null || \
 	printf '%s' "$(HOME)/.local/bin/uv")
 
 export UV_CACHE_DIR
+export MYPY_CACHE_DIR
 export UV_PROJECT_ENVIRONMENT := $(VENV_DIR)
 export HF_HOME := $(MODEL_DIR)
 
