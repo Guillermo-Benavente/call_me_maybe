@@ -1,7 +1,6 @@
 .venv
 .uv-cache
-data/
-llm_sdk/
+data/output/function_calling_results.json
 */__pycache__/
 *.pyc
 .pytest_cache/
