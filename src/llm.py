@@ -3,7 +3,7 @@ import numpy.typing as npt
 from typing import Any
 
 from src.validator import Validator
-from llm_sdk.llm_sdk import Small_LLM_Model
+from llm_sdk import Small_LLM_Model
 
 
 class LLM:

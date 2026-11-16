@@ -39,8 +39,6 @@ def main() -> None:
 
             user_prompt = prompt.prompt
 
-            print(f"Prompt {index}: ", end="")
-
             complete_prompt = PromptBuilder.build(
                 user_prompt=user_prompt,
                 functions_json=parser.functions_json,
@@ -57,7 +55,7 @@ def main() -> None:
             elapsed = time.perf_counter() - start
             minutes, seconds = divmod(int(elapsed), 60)
 
-            print(f"{minutes} min {seconds} s")
+            print(f"Prompt {index}: {minutes} min {seconds} s")
 
         total_elapsed = time.perf_counter() - total_start
         minutes, seconds = divmod(int(total_elapsed), 60)

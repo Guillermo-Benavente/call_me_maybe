@@ -74,8 +74,14 @@ class Parser:
                 list[FunctionDefinition],
             )
 
+            if self.prompts_json in ["", "[]"]:
+                raise ValueError("The prompts are empty")
+
+            if self.functions_json in ["", "[]"]:
+                raise ValueError("The functions are empty")
+
         except (OSError, json.JSONDecodeError, ValidationError) as error:
-            raise ValueError(f"Input configuration error: {error}") from error
+            raise ValueError(f"Input configuration error: {error}")
 
     @staticmethod
     def _parse_arguments() -> Namespace:
