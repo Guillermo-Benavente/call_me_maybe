@@ -24,7 +24,7 @@ def main() -> None:
         print(f"{'*' * 41}")
 
         print("\nLoading LLM model...")
-        llm = LLM()
+        llm = LLM(parser.functions)
         print("Model loaded!")
 
         total_start = time.perf_counter()

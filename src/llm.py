@@ -3,6 +3,7 @@ import numpy.typing as npt
 from typing import Any
 
 from src.validator import Validator
+from src.parser import FunctionDefinition
 from llm_sdk import Small_LLM_Model
 
 
@@ -10,7 +11,11 @@ class LLM:
     """Provide an interface for language model operations
     and JSON generation."""
 
-    def __init__(self, model_name: str = "Qwen/Qwen3-0.6B") -> None:
+    def __init__(
+        self,
+        functions: list[FunctionDefinition],
+        model_name: str = "Qwen/Qwen3-0.6B"
+    ) -> None:
         """Initialize the language model and its JSON grammar validator.
 
         Loads the specified model on the CPU and creates a validator
@@ -21,7 +26,7 @@ class LLM:
                 Defaults to "Qwen/Qwen3-0.6B".
         """
         self._llm = Small_LLM_Model(model_name, device="cpu")
-        self.json_grammar = Validator(self)
+        self.json_grammar = Validator(self, functions)
 
     def encode(self, text: str) -> Any:
         """Encode a text string into token IDs.
@@ -118,10 +123,11 @@ class LLM:
 
             if allowed is not None and allowed.size > 0:
                 next_id: int = int(allowed[np.argmax(logits[allowed])])
+                print(self.decode([next_id]), end="", flush=True)
                 generated.append(next_id)
                 grammar.advance(next_id)
 
-            if grammar.is_accepting:
+            if grammar.is_accepting():
                 break
 
             logits = np.asarray(
