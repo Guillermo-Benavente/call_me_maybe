@@ -6,13 +6,22 @@ from src.parser import FunctionDefinition, ParameterDefinition
 
 
 class Validator:
-    """Validate generated tokens to ensure they form a valid JSON object."""
+    """Validate generated tokens to ensure they form a valid JSON object.
+
+    Maintains the generation context to identify the selected function
+    and parameter, allowing token generation to be restricted according
+    to the expected parameter type.
+    """
 
     def __init__(self, llm: Any, functions: list[FunctionDefinition]) -> None:
-        """Initialize the validator with an LLM instance.
+        """Initialize the validator with an LLM and available functions.
+
+        Stores the function definitions and initializes the generation
+        context and vocabulary token collections.
 
         Args:
             llm: Language model instance used to decode generated tokens.
+            functions: Available function definitions and their parameters.
         """
         from src.llm import LLM
         self.llm: LLM = llm
@@ -39,13 +48,17 @@ class Validator:
         self.current_parameter: ParameterDefinition | None = None
 
     def initialize_vocab(self, vocab_size: int) -> None:
-        """Initialize the vocabulary token arrays.
+        """Initialize the vocabulary token collections.
 
-        Identifies tokens containing only characters allowed in JSON
-        structural elements and stores their IDs separately.
+        Iterates through the model vocabulary and classifies tokens
+        according to the characters they contain. Creates separate
+        collections for structural, numeric and boolean tokens.
 
         Args:
             vocab_size: Total number of tokens in the model vocabulary.
+
+        Returns:
+            None.
         """
         self.all_tokens = np.arange(vocab_size, dtype=np.int64)
         structural = []
@@ -69,15 +82,19 @@ class Validator:
         self.boolean_tokens = np.array(booleans, dtype=np.int64)
 
     def initial_state(self) -> "Validator":
-        """Reset the validator state.
+        """Reset the validator to its initial generation state.
 
-        Clears the generated tokens and the decoded text buffer.
+        Clears the generated tokens, decoded buffer and current function
+        and parameter references to prevent context from previous
+        generations from affecting the new generation.
 
         Returns:
-            The current validator instance.
+            The current validator instance with its generation state reset.
         """
         self.buffer = ""
         self.generated = []
+        self.current_function = None
+        self.current_parameter = None
 
         return self
 
@@ -87,7 +104,8 @@ class Validator:
         Tracks quotation marks while accounting for escaped characters.
 
         Returns:
-            True if the current buffer is inside a string, False otherwise.
+            True if the buffer is currently inside a JSON string,
+            False otherwise.
         """
         escaped = False
         inside = False
@@ -107,13 +125,14 @@ class Validator:
         return inside
 
     def allowed_tokens(self) -> npt.NDArray[np.int64] | None:
-        """Return the tokens allowed in the current generation state.
+        """Retrieve the allowed tokens for the current generation context.
 
-        All vocabulary tokens are allowed inside JSON strings.
-        Outside strings, only structural tokens are allowed.
+        Selects the vocabulary according to the current JSON state and
+        the type of the parameter being generated.
 
         Returns:
-            An array of allowed token IDs, or None if not initialized.
+            An array containing the allowed token IDs. Returns None
+            if the corresponding vocabulary has not been initialized.
         """
         if self.inside_string():
             return self.all_tokens
@@ -130,13 +149,16 @@ class Validator:
         return self.structural_tokens
 
     def advance(self, token_id: Any) -> "Validator":
-        """Add a generated token and update the decoded buffer.
+        """Advance the generation state with a newly generated token.
+
+        Appends the token ID, updates the decoded buffer and refreshes
+        the current function and parameter context.
 
         Args:
             token_id: ID of the newly generated token.
 
         Returns:
-            The current validator instance.
+            The current validator instance with its state updated.
         """
         self.generated.append(token_id)
         self.buffer = self.llm.decode(self.generated)
@@ -146,10 +168,13 @@ class Validator:
         return self
 
     def is_accepting(self) -> bool:
-        """Check whether the current buffer contains a valid JSON object.
+        """Check whether the generated buffer contains a valid JSON object.
+
+        Attempts to parse the current buffer and verifies that the
+        resulting JSON value is a dictionary.
 
         Returns:
-            True if the buffer can be parsed as a dictionary,
+            True if the buffer contains a valid JSON object,
             False otherwise.
         """
         try:
@@ -160,6 +185,19 @@ class Validator:
         return result
 
     def update_context(self) -> None:
+        """Update the current function and parameter generation context.
+
+        Identifies the selected function once its name is completely
+        generated. Then identifies the parameter being generated by
+        checking its name against the selected function definition.
+
+        Clears the current parameter when its value reaches a comma
+        or closing brace, allowing the validator to process the next
+        parameter or finish the parameters object.
+
+        Returns:
+            None.
+        """
         if self.current_parameter is not None:
             if self.buffer.endswith((",", "}")):
                 self.current_parameter = None

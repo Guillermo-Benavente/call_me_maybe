@@ -19,11 +19,17 @@ class LLM:
         """Initialize the language model and its JSON grammar validator.
 
         Loads the specified model on the CPU and creates a validator
-        to constrain generated tokens to valid JSON structures.
+        using the available function definitions to constrain generated
+        tokens according to the expected parameter types.
 
         Args:
+            functions: Available function definitions used by the validator
+                to identify parameters and their expected types.
             model_name: Name or path of the language model to load.
                 Defaults to "Qwen/Qwen3-0.6B".
+
+        Returns:
+            None.
         """
         self._llm = Small_LLM_Model(model_name, device="cpu")
         self.json_grammar = Validator(self, functions)
@@ -123,7 +129,6 @@ class LLM:
 
             if allowed is not None and allowed.size > 0:
                 next_id: int = int(allowed[np.argmax(logits[allowed])])
-                print(self.decode([next_id]), end="", flush=True)
                 generated.append(next_id)
                 grammar.advance(next_id)
 
